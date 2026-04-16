@@ -1,3 +1,6 @@
+-- location: backend/src/db/schema.sql
+
+
 -- =============================================
 -- COURSE REGISTRATION SYSTEM - DATABASE SCHEMA
 -- =============================================

@@ -1,22 +1,36 @@
 cấu trúc file:
 
 .
-├── backend
-│   └── src
-│       ├── config        # Cấu hình môi trường, DB
-│       ├── controllers   # Xử lý logic nghiệp vụ (Business Logic)
-│       ├── db            # Kết nối database
-│       ├── middleware    # Kiểm tra quyền, Log, Auth
-│       └── routes        # Định nghĩa các đầu API
-├── database              # Chứa file SQL, Backup dữ liệu
-└── frontend
-    └── src
-        ├── api           # Nơi gọi fetch/axios tới backend
-        ├── components    # Các UI nhỏ (Button, Input, Card)
-        ├── context       # Quản lý State (Login, Cart, v.v.)
-        ├── pages         # Các màn hình chính (Home, Register, Dashboard)
-        └── styles        # CSS/Tailwind files
+├── backend/
+│   ├── src/
+│   │   ├── config/          # Cấu hình hệ thống (Port, Constants)
+│   │   ├── controllers/     # Xử lý logic nghiệp vụ (Auth, Course, Tuition)
+│   │   ├── db/              # TẦNG DỮ LIỆU
+│   │   │   ├── db.js        # Kết nối Pool MySQL
+│   │   │   ├── init.js      # Script khởi tạo database
+│   │   │   └── schema.sql   # FILE SQL TẠO BẢNG (Nằm ở đây)
+│   │   ├── middleware/      # Kiểm tra bảo mật (auth.js, stageCheck.js)
+│   │   ├── routes/          # Định nghĩa các đầu API
+│   │   └── server.js        # File chạy Server
+│   ├── .env                 # Mật khẩu DB, JWT Secret
+│   ├── .gitignore           # Chặn node_modules, .env
+│   └── package.json         # Scripts & Dependencies BE
+│
+└── frontend/
+    ├── src/
+    │   ├── api/             # Gọi Axios tới backend
+    │   ├── components/      # UI components (Button, Card)
+    │   ├── context/         # AuthContext.js (Login state)
+    │   ├── pages/           # Login, Register, Dashboard
+    │   ├── styles/          # CSS/Tailwind
+    │   ├── App.js           # Main Routes
+    │   └── index.js         # React Entry Point
+    ├── index.html           # Root HTML
+    ├── .gitignore           # Chặn node_modules FE
+    └── package.json         # Scripts & Dependencies FE
 
 mô tả btl: 
 https://docs.google.com/document/d/1LnqBgv4yEpLlybXjKwH_FKy1poBWIZNRYLcyAMoN030/edit?usp=sharing
 
+<!-- location: frontend/index.html -->
+ 

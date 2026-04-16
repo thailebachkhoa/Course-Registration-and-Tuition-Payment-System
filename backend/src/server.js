@@ -1,3 +1,5 @@
+// location: backend/src/server.js
+
 const express = require('express');
 const cors = require('cors');
 require('dotenv').config();

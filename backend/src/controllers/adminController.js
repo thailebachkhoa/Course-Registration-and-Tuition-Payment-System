@@ -1,3 +1,5 @@
+// location: backend/src/controllers/adminController.js
+
 const pool = require('../config/db');
 
 const STAGES = ['create_class', 'register_class', 'lock_class', 'scheduled_class'];

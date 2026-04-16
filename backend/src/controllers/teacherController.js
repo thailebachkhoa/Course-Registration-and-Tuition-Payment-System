@@ -1,3 +1,5 @@
+// location: backend/src/controllers/teacherController.js
+
 const pool = require('../config/db');
 
 // GET /api/teacher/classes — list my classes with JOIN (f)

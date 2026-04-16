@@ -1,3 +1,5 @@
+// location: backend/src/controllers/studentController.js
+
 const pool = require('../config/db');
 
 // GET /api/student/catalog — all classes with enrollment status

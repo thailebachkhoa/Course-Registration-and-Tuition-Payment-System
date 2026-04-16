@@ -1,5 +1,5 @@
 // database connection pool using mysql2/promise
-
+// location: backend/src/db/db.js
 const mysql = require('mysql2/promise');
 require('dotenv').config();
 
