@@ -1,41 +1,266 @@
-cấu trúc file:
+# 🎓 Hệ thống Đăng ký Học phần & Thu Học phí
 
+Ứng dụng mô phỏng quy trình đăng ký môn học và xác nhận học phí với 3 vai trò: **Admin**, **Giảng viên**, **Sinh viên**.
+
+---
+
+## ⚠️ Các lỗi cần fix trước khi chạy
+
+
+
+
+---
+
+## 🗂️ Cấu trúc thư mục hoàn chỉnh
+
+```
 .
 ├── backend/
 │   ├── src/
-│   │   ├── config/          # Cấu hình hệ thống (Port, Constants)
-│   │   ├── controllers/     # Xử lý logic nghiệp vụ (Auth, Course, Tuition)
-│   │   ├── db/              # TẦNG DỮ LIỆU
-│   │   │   ├── db.js        # Kết nối Pool MySQL
-│   │   │   ├── init.js      # Script khởi tạo database
-│   │   │   └── schema.sql   # FILE SQL TẠO BẢNG (Nằm ở đây)
-│   │   ├── middleware/      # Kiểm tra bảo mật (auth.js, stageCheck.js)
-│   │   ├── routes/          # Định nghĩa các đầu API
-│   │   └── server.js        # File chạy Server
-│   ├── .env                 # Mật khẩu DB, JWT Secret
-│   ├── .gitignore           # Chặn node_modules, .env
-│   └── package.json         # Scripts & Dependencies BE
+│   │   ├── config/
+│   │   │   └── db.js              # Re-export pool (bridge cho controllers)
+│   │   ├── controllers/
+│   │   │   ├── adminController.js
+│   │   │   ├── authController.js
+│   │   │   ├── studentController.js
+│   │   │   └── teacherController.js
+│   │   ├── db/
+│   │   │   ├── db.js              # MySQL connection pool
+│   │   │   ├── init.js            # Script khởi tạo DB
+│   │   │   └── schema.sql         # DDL + seed data
+│   │   ├── middleware/
+│   │   │   ├── auth.js            # JWT authenticate + requireRole
+│   │   │   └── stageCheck.js      # requireStage middleware
+│   │   ├── routes/
+│   │   │   ├── adminRoutes.js
+│   │   │   ├── authRoutes.js
+│   │   │   ├── studentRoutes.js
+│   │   │   └── teacherRoutes.js
+│   │   └── server.js
+│   ├── .env
+│   ├── .gitignore
+│   └── package.json
 │
 └── frontend/
+    ├── public/
+    │   └── index.html             # ← PHẢI NẰM Ở ĐÂY (sau khi mv)
     ├── src/
-    │   ├── api/             # Gọi Axios tới backend
-    │   ├── components/      # UI components (Button, Card)
-    │   ├── context/         # AuthContext.js (Login state)
-    │   ├── pages/           # Login, Register, Dashboard
-    │   ├── styles/          # CSS/Tailwind
-    │   ├── App.js           # Main Routes
-    │   └── index.js         # React Entry Point
-    ├── index.html           # Root HTML
-    ├── .gitignore           # Chặn node_modules FE
-    └── package.json         # Scripts & Dependencies FE
+    │   ├── api/
+    │   │   └── index.js           # Axios instance + tất cả API calls
+    │   ├── context/
+    │   │   └── AuthContext.js     # Global auth state
+    │   ├── pages/
+    │   │   ├── LoginPage.js
+    │   │   ├── RegisterPage.js
+    │   │   ├── AdminDashboard.js
+    │   │   ├── TeacherDashboard.js
+    │   │   └── StudentDashboard.js
+    │   ├── styles/
+    │   │   └── index.css
+    │   ├── App.js                 # Router
+    │   └── index.js               # React entry point
+    ├── .gitignore
+    └── package.json
+```
+
+---
+
+## 🛠️ Yêu cầu hệ thống
+
+| Phần mềm | Phiên bản tối thiểu |
+|----------|---------------------|
+| Node.js  | v18+                |
+| MySQL    | v8.0+               |
+| npm      | v9+                 |
+
+---
+
+## 🚀 Hướng dẫn cài đặt & chạy
+
+### Bước 1 – Clone & chuẩn bị
+
+```bash
+git clone <repo-url>
+cd <project-root>
+```
+
+### Bước 2 – Cấu hình Database
+
+Đảm bảo MySQL đang chạy, sau đó tạo file `.env` trong thư mục `backend/`:
+
+```env
+# backend/.env
+DB_HOST=localhost
+DB_USER=root
+DB_PASSWORD=        # mật khẩu MySQL của bạn
+DB_NAME=course_registration
+JWT_SECRET=your_super_secret_jwt_key_change_this
+ADMIN_PASSWORD=admin123
+PORT=5000
+```
+
+> **Lưu ý:** `DB_PASSWORD` để trống nếu MySQL không có mật khẩu (mặc định khi cài local).
+
+### Bước 3 – Khởi tạo Database
+
+```bash
+cd backend
+npm install
+npm run init-db
+```
+
+Kết quả thành công sẽ in ra:
+```
+✅ Connected to MySQL
+✅ Schema applied
+✅ Admin account ready (email: admin@school.edu.vn, pass: admin123)
+🎉 Database initialized successfully!
+```
+
+Script này tự động:
+- Tạo database `course_registration`
+- Tạo tất cả bảng (Users, Courses, Classes, Enrollments, SystemState)
+- Seed 20 môn học có sẵn
+- Tạo tài khoản admin với mật khẩu đã hash
+
+### Bước 4 – Chạy Backend
+
+```bash
+# Trong thư mục backend/
+npm run dev      # development (nodemon – tự reload khi sửa code)
+# hoặc
+npm start        # production
+```
+
+Backend chạy tại: `http://localhost:5000`
+
+Kiểm tra: `http://localhost:5000/api/health` → `{"status":"ok"}`
+
+### Bước 5 – Chạy Frontend
+
+Mở terminal mới:
+
+```bash
+cd frontend
+npm install
+npm start
+```
+
+Frontend chạy tại: `http://localhost:3000`
+
+> Frontend tự proxy `/api/*` sang `http://localhost:5000` nhờ field `"proxy"` trong `package.json`.
+
+---
+
+## 👤 Tài khoản mặc định
+
+| Role  | Email / ID              | Mật khẩu |
+|-------|-------------------------|-----------|
+| Admin | `admin@school.edu.vn`   | `admin123`|
+| Admin | `admin001`              | `admin123`|
+
+Tài khoản Giảng viên và Sinh viên tự đăng ký tại trang `/register`.
+
+---
+
+## 📋 Luồng sử dụng hệ thống
+
+```
+Giai đoạn 1: create_class
+  → Teacher đăng nhập, vào "Quản lý lớp học", tạo lớp
+  → Student BỊ KHÓA đăng nhập
+
+Giai đoạn 2: register_class  (Admin bấm Next)
+  → Student đăng nhập, vào "Danh sách lớp", đăng ký môn
+  → Student vào "Học phí", bấm "Xác nhận chuyển khoản"
+  → Teacher BỊ KHÓA đăng nhập
+
+Giai đoạn 3: lock_class  (Admin bấm Next)
+  → Cả Student và Teacher đều BỊ KHÓA
+  → Admin vào "Xác nhận học phí", bấm ✅ cho từng SV
+
+Giai đoạn 4: scheduled_class  (Admin bấm Next)
+  → Student xem "Thời khóa biểu" (chỉ môn đã payed)
+  → Teacher xem "Lịch dạy" (+ số SV đã đóng tiền)
+
+Quay lại Giai đoạn 1  (Admin bấm Next)
+  → TẤT CẢ lớp học và đăng ký bị XÓA SẠCH
+  → Bắt đầu học kỳ mới
+```
+
+---
+
+## 🔌 API Endpoints
+
+### Auth
+| Method | Endpoint              | Mô tả                  |
+|--------|-----------------------|------------------------|
+| POST   | `/api/auth/register`  | Đăng ký tài khoản      |
+| POST   | `/api/auth/login`     | Đăng nhập              |
+
+### Admin *(yêu cầu role: admin)*
+| Method | Endpoint                           | Mô tả                      |
+|--------|------------------------------------|----------------------------|
+| GET    | `/api/admin/stage`                 | Lấy giai đoạn hiện tại     |
+| POST   | `/api/admin/stage/next`            | Chuyển giai đoạn tiếp theo |
+| GET    | `/api/admin/payment-requests`      | Danh sách SV chờ duyệt HP  |
+| POST   | `/api/admin/approve-payment/:id`   | Duyệt học phí cho SV       |
+
+### Teacher *(yêu cầu role: teacher)*
+| Method | Endpoint                        | Mô tả               |
+|--------|---------------------------------|---------------------|
+| GET    | `/api/teacher/classes`          | Danh sách lớp của tôi |
+| POST   | `/api/teacher/classes`          | Tạo lớp mới         |
+| PUT    | `/api/teacher/classes/:id`      | Cập nhật lớp        |
+| DELETE | `/api/teacher/classes/:id`      | Xóa lớp             |
+| GET    | `/api/teacher/schedule`         | Lịch dạy (Stage 4)  |
+| GET    | `/api/courses`                  | Danh sách môn học   |
+
+### Student *(yêu cầu role: student)*
+| Method | Endpoint                        | Mô tả                        |
+|--------|---------------------------------|------------------------------|
+| GET    | `/api/student/catalog`          | Danh sách lớp + bộ lọc       |
+| GET    | `/api/student/enrollments`      | Môn đã đăng ký               |
+| POST   | `/api/student/enroll`           | Đăng ký lớp                  |
+| DELETE | `/api/student/enroll/:classId`  | Hủy đăng ký                  |
+| GET    | `/api/student/tuition`          | Thông tin học phí             |
+| POST   | `/api/student/request-payment`  | Xác nhận đã chuyển khoản     |
+| GET    | `/api/student/schedule`         | Thời khóa biểu (Stage 4)     |
+| GET    | `/api/student/departments`      | Danh sách khoa (cho filter)  |
+
+---
+
+## 🗃️ Database Schema
+
+```
+Courses        — Dữ liệu tĩnh (course_code, course_name, credits, department)
+SystemState    — Giai đoạn hiện tại của hệ thống
+Users          — Tất cả users (admin/teacher/student)
+Classes        — Lớp học do teacher tạo (FK: course_code, teacher_id)
+Enrollments    — Đăng ký môn (FK: student_id, class_id) | status: enrolled/payed
+```
+
+---
+
+## ❓ Xử lý lỗi thường gặp
+
+**`Error: connect ECONNREFUSED`**
+→ MySQL chưa chạy. Khởi động MySQL service.
+
+**`Access denied for user 'root'@'localhost'`**
+→ Sai mật khẩu DB trong `.env`. Kiểm tra lại `DB_PASSWORD`.
+
+**`Cannot find module '../controllers/adminController'`**
+→ Tên file route cũ (`adminRoute.js`) không khớp. Đảm bảo dùng `adminRoutes.js` (có chữ s).
+
+**`Failed to compile` – `Cannot find module`**
+→ Quên chạy `npm install` trong thư mục `frontend/`.
+
+**Trang trắng sau khi `npm start`**
+→ `index.html` chưa được move vào `frontend/public/`. Xem **Bug 1** ở trên.
 
 mô tả btl: 
 https://docs.google.com/document/d/1LnqBgv4yEpLlybXjKwH_FKy1poBWIZNRYLcyAMoN030/edit?usp=sharing
 
-Danh sách các lỗi:
-1. liên quan đến .gitinore -> tạo file trước khi push :(
-    backend/.gitignore
-    frontend/.gitignore
-)
 
  

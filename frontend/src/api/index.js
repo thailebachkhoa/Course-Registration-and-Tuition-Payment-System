@@ -1,4 +1,4 @@
-// location: frontend/src/index.js
+// location: frontend/src/api/index.js
 import axios from 'axios';
 
 const api = axios.create({

@@ -1,3 +1,4 @@
+// location: frontend/src/pages/TeacherDashboard.js
 import React, { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { teacherAPI, courseAPI } from '../api';

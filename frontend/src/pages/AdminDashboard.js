@@ -1,3 +1,4 @@
+// location: frontend/src/pages/AdminDashboard.js
 import React, { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { adminAPI } from '../api';
