@@ -32,5 +32,10 @@ cấu trúc file:
 mô tả btl: 
 https://docs.google.com/document/d/1LnqBgv4yEpLlybXjKwH_FKy1poBWIZNRYLcyAMoN030/edit?usp=sharing
 
-<!-- location: frontend/index.html -->
+Danh sách các lỗi:
+1. liên quan đến .gitinore -> tạo file trước khi push :(
+    backend/.gitignore
+    frontend/.gitignore
+)
+
  
