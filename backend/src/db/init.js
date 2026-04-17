@@ -1,5 +1,5 @@
 // initalize database: create tables and set up admin account
-
+// location: backend/src/db/init.js
 const mysql = require('mysql2/promise');
 const bcrypt = require('bcryptjs');
 const fs = require('fs');
@@ -16,9 +16,9 @@ async function initDb() {
 
   console.log('✅ Connected to MySQL');
 
-  // Run schema
+  // Run schema - FIX: path is relative to THIS file (src/db/)
   const schema = fs.readFileSync(
-    path.join(__dirname, '../../../database/schema.sql'),
+    path.join(__dirname, 'schema.sql'),
     'utf-8'
   );
   await conn.query(schema);

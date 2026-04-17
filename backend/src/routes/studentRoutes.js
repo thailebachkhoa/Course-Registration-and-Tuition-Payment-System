@@ -1,3 +1,5 @@
+// location: backend/src/routes/studentRoutes.js
+
 const express = require('express');
 const router = express.Router();
 const {

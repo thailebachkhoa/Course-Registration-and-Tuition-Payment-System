@@ -1,3 +1,5 @@
+// location: backend/src/routes/adminRoutes.js
+
 const express = require('express');
 const router = express.Router();
 const { getStage, nextStage, getPaymentRequests, approvePayment } = require('../controllers/adminController');
