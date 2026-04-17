@@ -1,0 +1,1189 @@
+cấu trúc file:
+
+.
+├── backend/
+│   ├── src/
+│   │   ├── config/          # Cấu hình hệ thống (Port, Constants)
+│   │   ├── controllers/     # Xử lý logic nghiệp vụ (Auth, Course, Tuition)
+│   │   ├── db/              # TẦNG DỮ LIỆU
+│   │   │   ├── db.js        # Kết nối Pool MySQL
+│   │   │   ├── init.js      # Script khởi tạo database
+│   │   │   └── schema.sql   # FILE SQL TẠO BẢNG (Nằm ở đây)
+│   │   ├── middleware/      # Kiểm tra bảo mật (auth.js, stageCheck.js)
+│   │   ├── routes/          # Định nghĩa các đầu API
+│   │   └── server.js        # File chạy Server
+│   ├── .env                 # Mật khẩu DB, JWT Secret
+│   ├── .gitignore           # Chặn node_modules, .env
+│   └── package.json         # Scripts & Dependencies BE
+│
+└── frontend/
+    ├── src/
+    │   ├── api/             # Gọi Axios tới backend
+    │   ├── components/      # UI components (Button, Card)
+    │   ├── context/         # AuthContext.js (Login state)
+    │   ├── pages/           # Login, Register, Dashboard
+    │   ├── styles/          # CSS/Tailwind
+    │   ├── App.js           # Main Routes
+    │   └── index.js         # React Entry Point
+    ├── index.html           # Root HTML
+    ├── .gitignore           # Chặn node_modules FE
+    └── package.json         # Scripts & Dependencies FE
+
+
+// location: backend/src/controllers/adminController.js
+
+const pool = require('../config/db');
+
+const STAGES = ['create_class', 'register_class', 'lock_class', 'scheduled_class'];
+
+// GET /api/admin/stage
+const getStage = async (req, res) => {
+  const [rows] = await pool.query('SELECT current_stage FROM SystemState WHERE id = 1');
+  res.json({ stage: rows[0].current_stage });
+};
+
+// POST /api/admin/stage/next  — UPDATE (c)
+const nextStage = async (req, res) => {
+  const [rows] = await pool.query('SELECT current_stage FROM SystemState WHERE id = 1');
+  const current = rows[0].current_stage;
+  const idx = STAGES.indexOf(current);
+  const next = STAGES[(idx + 1) % STAGES.length];
+
+  await pool.query('UPDATE SystemState SET current_stage = ? WHERE id = 1', [next]);
+
+  // If transitioning from scheduled_class -> create_class, wipe classes & enrollments (b)
+  if (current === 'scheduled_class' && next === 'create_class') {
+    await pool.query('DELETE FROM Enrollments');
+    await pool.query('DELETE FROM Classes');
+  }
+
+  res.json({ stage: next, message: `Chuyển sang: ${next}` });
+};
+
+// GET /api/admin/payment-requests — list students who requested payment
+const getPaymentRequests = async (req, res) => {
+  // Aggregate: student info + SUM credits (h)
+  const [rows] = await pool.query(`
+    SELECT
+      u.person_id,
+      u.full_name,
+      SUM(c2.credits) * 600000 AS total_amount,
+      COUNT(e.id) AS class_count
+    FROM Users u
+    JOIN Enrollments e ON e.student_id = u.person_id
+    JOIN Classes cl ON cl.class_id = e.class_id
+    JOIN Courses c2 ON c2.course_code = cl.course_code
+    WHERE e.payment_requested = TRUE AND e.status = 'enrolled'
+    GROUP BY u.person_id, u.full_name
+    ORDER BY u.full_name
+  `);
+  res.json(rows);
+};
+
+// POST /api/admin/approve-payment/:studentId — UPDATE enrolled -> payed (c)
+const approvePayment = async (req, res) => {
+  const { studentId } = req.params;
+  await pool.query(
+    `UPDATE Enrollments SET status = 'payed', payment_requested = FALSE
+     WHERE student_id = ? AND payment_requested = TRUE AND status = 'enrolled'`,
+    [studentId]
+  );
+  res.json({ message: 'Đã xác nhận học phí' });
+};
+
+module.exports = { getStage, nextStage, getPaymentRequests, approvePayment };
+
+// location: backend/src/controllers/authController.js
+
+const bcrypt = require('bcryptjs');
+const jwt = require('jsonwebtoken');
+const pool = require('../config/db');
+
+// POST /api/auth/register
+const register = async (req, res) => {
+  const { person_id, email, password, full_name, role } = req.body;
+
+  if (!person_id || !email || !password || !full_name || !role) {
+    return res.status(400).json({ message: 'Thiếu thông tin bắt buộc' });
+  }
+  if (!['teacher', 'student'].includes(role)) {
+    return res.status(400).json({ message: 'Role phải là teacher hoặc student' });
+  }
+
+  try {
+    // Check duplicate personId or email
+    const [existing] = await pool.query(
+      'SELECT person_id, email FROM Users WHERE person_id = ? OR email = ?',
+      [person_id, email]
+    );
+    if (existing.length > 0) {
+      const dup = existing[0];
+      if (dup.person_id === person_id)
+        return res.status(409).json({ message: 'Mã số sinh viên/giảng viên đã tồn tại' });
+      return res.status(409).json({ message: 'Email đã được sử dụng' });
+    }
+
+    const hashed = await bcrypt.hash(password, 10);
+    // INSERT (a)
+    await pool.query(
+      'INSERT INTO Users (person_id, email, password, full_name, role) VALUES (?, ?, ?, ?, ?)',
+      [person_id, email, hashed, full_name, role]
+    );
+
+    return res.status(201).json({ message: 'Đăng ký thành công' });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ message: 'Lỗi server' });
+  }
+};
+
+// POST /api/auth/login
+const login = async (req, res) => {
+  const { identifier, password } = req.body;
+  if (!identifier || !password)
+    return res.status(400).json({ message: 'Thiếu thông tin đăng nhập' });
+
+  try {
+    // Allow login with email OR person_id (d)
+    const [rows] = await pool.query(
+      'SELECT * FROM Users WHERE email = ? OR person_id = ?',
+      [identifier, identifier]
+    );
+    if (rows.length === 0)
+      return res.status(401).json({ message: 'Tài khoản không tồn tại' });
+
+    const user = rows[0];
+    const valid = await bcrypt.compare(password, user.password);
+    if (!valid)
+      return res.status(401).json({ message: 'Mật khẩu không đúng' });
+
+    // Check system stage for role locking
+    const [stateRows] = await pool.query('SELECT current_stage FROM SystemState WHERE id = 1');
+    const stage = stateRows[0]?.current_stage || 'create_class';
+
+    if (user.role !== 'admin') {
+      if (stage === 'create_class' && user.role === 'student') {
+        return res.status(403).json({ message: 'Hệ thống đang tạo lớp', stage, blocked: true });
+      }
+      if (stage === 'register_class' && user.role === 'teacher') {
+        return res.status(403).json({ message: 'Hệ thống đang đăng ký lớp', stage, blocked: true });
+      }
+      if (stage === 'lock_class') {
+        return res.status(403).json({ message: 'Hệ thống đang chuẩn bị thời khóa biểu', stage, blocked: true });
+      }
+    }
+
+    const token = jwt.sign(
+      { person_id: user.person_id, email: user.email, role: user.role, full_name: user.full_name },
+      process.env.JWT_SECRET || 'secret',
+      { expiresIn: '8h' }
+    );
+
+    return res.json({
+      token,
+      user: {
+        person_id: user.person_id,
+        email: user.email,
+        full_name: user.full_name,
+        role: user.role,
+      },
+      stage,
+    });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ message: 'Lỗi server' });
+  }
+};
+
+module.exports = { register, login };
+
+// location: backend/src/controllers/studentController.js
+
+const pool = require('../config/db');
+
+// GET /api/student/catalog — all classes with enrollment status
+// Uses JOIN (f) + subquery (g)
+const getCatalog = async (req, res) => {
+  const { person_id } = req.user;
+  const { department, credits, course_code } = req.query;
+
+  let whereClause = '1=1';
+  const params = [person_id];
+  const filterParams = [];
+
+  // Composite condition (e): filter by department AND/OR credits
+  if (department) {
+    whereClause += ' AND c.department = ?';
+    filterParams.push(department);
+  }
+  if (credits) {
+    whereClause += ' AND c.credits = ?';
+    filterParams.push(parseInt(credits));
+  }
+  // Single condition (d): filter by course_code
+  if (course_code) {
+    whereClause += ' AND cl.course_code = ?';
+    filterParams.push(course_code);
+  }
+
+  // JOIN + subquery (g): check enrollment NOT EXISTS
+  const [rows] = await pool.query(
+    `SELECT
+       cl.class_id,
+       cl.course_code,
+       c.course_name,
+       c.credits,
+       c.department,
+       u.full_name AS teacher_name,
+       cl.day_of_week,
+       cl.start_time,
+       cl.end_time,
+       CASE
+         WHEN EXISTS (
+           SELECT 1 FROM Enrollments e2
+           WHERE e2.student_id = ? AND e2.class_id = cl.class_id
+         ) THEN 'enrolled'
+         ELSE 'not-enrolled'
+       END AS enrollment_status
+     FROM Classes cl
+     JOIN Courses c ON c.course_code = cl.course_code
+     JOIN Users u ON u.person_id = cl.teacher_id
+     WHERE ${whereClause}
+     ORDER BY cl.course_code, cl.class_id`,
+    [person_id, ...filterParams]
+  );
+  res.json(rows);
+};
+
+// GET /api/student/enrollments — my enrolled classes
+const getEnrollments = async (req, res) => {
+  const { person_id } = req.user;
+  // JOIN (f)
+  const [rows] = await pool.query(
+    `SELECT
+       e.id AS enrollment_id,
+       cl.class_id,
+       cl.course_code,
+       c.course_name,
+       c.credits,
+       c.department,
+       u.full_name AS teacher_name,
+       cl.day_of_week,
+       cl.start_time,
+       cl.end_time,
+       e.status,
+       e.payment_requested
+     FROM Enrollments e
+     JOIN Classes cl ON cl.class_id = e.class_id
+     JOIN Courses c ON c.course_code = cl.course_code
+     JOIN Users u ON u.person_id = cl.teacher_id
+     WHERE e.student_id = ?
+     ORDER BY cl.course_code`,
+    [person_id]
+  );
+  res.json(rows);
+};
+
+// GET /api/student/schedule — only payed classes (Stage 4)
+const getSchedule = async (req, res) => {
+  const { person_id } = req.user;
+  // Composite condition (e): student_id AND status = payed
+  const [rows] = await pool.query(
+    `SELECT
+       cl.class_id,
+       cl.course_code,
+       c.course_name,
+       c.credits,
+       u.full_name AS teacher_name,
+       cl.day_of_week,
+       cl.start_time,
+       cl.end_time
+     FROM Enrollments e
+     JOIN Classes cl ON cl.class_id = e.class_id
+     JOIN Courses c ON c.course_code = cl.course_code
+     JOIN Users u ON u.person_id = cl.teacher_id
+     WHERE e.student_id = ? AND e.status = 'payed'
+     ORDER BY cl.start_time`,
+    [person_id]
+  );
+
+  // Aggregate (h): total credits + count
+  const [summary] = await pool.query(
+    `SELECT COUNT(e.id) AS total_classes, SUM(c.credits) AS total_credits
+     FROM Enrollments e
+     JOIN Classes cl ON cl.class_id = e.class_id
+     JOIN Courses c ON c.course_code = cl.course_code
+     WHERE e.student_id = ? AND e.status = 'payed'`,
+    [person_id]
+  );
+
+  res.json({ classes: rows, summary: summary[0] });
+};
+
+// POST /api/student/enroll — enroll in a class (a)
+const enroll = async (req, res) => {
+  const { person_id } = req.user;
+  const { class_id } = req.body;
+
+  if (!class_id)
+    return res.status(400).json({ message: 'Thiếu class_id' });
+
+  // Check class exists
+  const [classes] = await pool.query('SELECT class_id FROM Classes WHERE class_id = ?', [class_id]);
+  if (classes.length === 0)
+    return res.status(404).json({ message: 'Lớp học không tồn tại' });
+
+  // No duplicate enrollment (unique constraint)
+  try {
+    await pool.query(
+      'INSERT INTO Enrollments (student_id, class_id, status) VALUES (?, ?, ?)',
+      [person_id, class_id, 'enrolled']
+    );
+    res.status(201).json({ message: 'Đăng ký thành công' });
+  } catch (err) {
+    if (err.code === 'ER_DUP_ENTRY')
+      return res.status(409).json({ message: 'Bạn đã đăng ký lớp này rồi' });
+    throw err;
+  }
+};
+
+// DELETE /api/student/enroll/:classId — cancel enrollment (b)
+const cancelEnroll = async (req, res) => {
+  const { person_id } = req.user;
+  const { classId } = req.params;
+
+  const [result] = await pool.query(
+    'DELETE FROM Enrollments WHERE student_id = ? AND class_id = ?',
+    [person_id, classId]
+  );
+  if (result.affectedRows === 0)
+    return res.status(404).json({ message: 'Không tìm thấy đăng ký' });
+  res.json({ message: 'Hủy đăng ký thành công' });
+};
+
+// GET /api/student/tuition — tuition summary with aggregate (h)
+const getTuition = async (req, res) => {
+  const { person_id } = req.user;
+
+  const [rows] = await pool.query(
+    `SELECT
+       cl.class_id,
+       cl.course_code,
+       c.course_name,
+       c.credits,
+       e.status,
+       e.payment_requested
+     FROM Enrollments e
+     JOIN Classes cl ON cl.class_id = e.class_id
+     JOIN Courses c ON c.course_code = cl.course_code
+     WHERE e.student_id = ? AND e.status = 'enrolled'
+     ORDER BY cl.course_code`,
+    [person_id]
+  );
+
+  // Aggregate SUM (h)
+  const [total] = await pool.query(
+    `SELECT SUM(c.credits) * 600000 AS total_amount, SUM(c.credits) AS total_credits
+     FROM Enrollments e
+     JOIN Classes cl ON cl.class_id = e.class_id
+     JOIN Courses c ON c.course_code = cl.course_code
+     WHERE e.student_id = ? AND e.status = 'enrolled'`,
+    [person_id]
+  );
+
+  const hasPaymentRequested = rows.some((r) => r.payment_requested);
+
+  res.json({
+    classes: rows,
+    total_amount: total[0].total_amount || 0,
+    total_credits: total[0].total_credits || 0,
+    payment_requested: hasPaymentRequested,
+  });
+};
+
+// POST /api/student/request-payment — confirm payment (c: flag payment_requested)
+const requestPayment = async (req, res) => {
+  const { person_id } = req.user;
+
+  const [enrollments] = await pool.query(
+    `SELECT id FROM Enrollments WHERE student_id = ? AND status = 'enrolled'`,
+    [person_id]
+  );
+  if (enrollments.length === 0)
+    return res.status(400).json({ message: 'Không có môn học nào để xác nhận' });
+
+  await pool.query(
+    `UPDATE Enrollments SET payment_requested = TRUE
+     WHERE student_id = ? AND status = 'enrolled'`,
+    [person_id]
+  );
+  res.json({ message: 'Đã gửi xác nhận chuyển khoản cho Admin' });
+};
+
+// GET /api/departments — distinct departments
+const getDepartments = async (req, res) => {
+  const [rows] = await pool.query('SELECT DISTINCT department FROM Courses ORDER BY department');
+  res.json(rows.map((r) => r.department));
+};
+
+module.exports = {
+  getCatalog,
+  getEnrollments,
+  getSchedule,
+  enroll,
+  cancelEnroll,
+  getTuition,
+  requestPayment,
+  getDepartments,
+};
+
+// location: backend/src/controllers/teacherController.js
+
+const pool = require('../config/db');
+
+// GET /api/teacher/classes — list my classes with JOIN (f)
+const getMyClasses = async (req, res) => {
+  const { person_id } = req.user;
+  // Query with single condition (d): WHERE teacher_id = ?
+  const [rows] = await pool.query(
+    `SELECT cl.class_id, cl.course_code, c.course_name, c.credits, c.department,
+            cl.day_of_week, cl.start_time, cl.end_time
+     FROM Classes cl
+     JOIN Courses c ON c.course_code = cl.course_code
+     WHERE cl.teacher_id = ?
+     ORDER BY cl.class_id DESC`,
+    [person_id]
+  );
+  res.json(rows);
+};
+
+// GET /api/teacher/schedule — schedule view (Stage 4) with payed count (h)
+const getSchedule = async (req, res) => {
+  const { person_id } = req.user;
+  const [rows] = await pool.query(
+    `SELECT cl.class_id, cl.course_code, c.course_name, c.credits,
+            cl.day_of_week, cl.start_time, cl.end_time,
+            COUNT(e.student_id) AS payed_count
+     FROM Classes cl
+     JOIN Courses c ON c.course_code = cl.course_code
+     LEFT JOIN Enrollments e ON e.class_id = cl.class_id AND e.status = 'payed'
+     WHERE cl.teacher_id = ?
+     GROUP BY cl.class_id, cl.course_code, c.course_name, c.credits,
+              cl.day_of_week, cl.start_time, cl.end_time
+     ORDER BY cl.start_time`,
+    [person_id]
+  );
+  res.json(rows);
+};
+
+// POST /api/teacher/classes — create new class (a)
+const createClass = async (req, res) => {
+  const { person_id } = req.user;
+  const { course_code, day_of_week, start_time, end_time } = req.body;
+
+  if (!course_code || !day_of_week || !start_time || !end_time)
+    return res.status(400).json({ message: 'Thiếu thông tin lớp học' });
+
+  // Check course exists
+  const [courses] = await pool.query(
+    'SELECT course_code FROM Courses WHERE course_code = ?',
+    [course_code]
+  );
+  if (courses.length === 0)
+    return res.status(404).json({ message: 'Mã môn học không tồn tại' });
+
+  // INSERT (a)
+  const [result] = await pool.query(
+    'INSERT INTO Classes (course_code, teacher_id, day_of_week, start_time, end_time) VALUES (?, ?, ?, ?, ?)',
+    [course_code, person_id, day_of_week, start_time, end_time]
+  );
+  res.status(201).json({ message: 'Tạo lớp thành công', class_id: result.insertId });
+};
+
+// PUT /api/teacher/classes/:classId — update class (c)
+const updateClass = async (req, res) => {
+  const { person_id } = req.user;
+  const { classId } = req.params;
+  const { day_of_week, start_time, end_time } = req.body;
+
+  // Verify ownership
+  const [rows] = await pool.query(
+    'SELECT class_id FROM Classes WHERE class_id = ? AND teacher_id = ?',
+    [classId, person_id]
+  );
+  if (rows.length === 0)
+    return res.status(403).json({ message: 'Không có quyền chỉnh sửa lớp này' });
+
+  await pool.query(
+    'UPDATE Classes SET day_of_week = ?, start_time = ?, end_time = ? WHERE class_id = ?',
+    [day_of_week, start_time, end_time, classId]
+  );
+  res.json({ message: 'Cập nhật thành công' });
+};
+
+// DELETE /api/teacher/classes/:classId — delete class (b)
+const deleteClass = async (req, res) => {
+  const { person_id } = req.user;
+  const { classId } = req.params;
+
+  const [rows] = await pool.query(
+    'SELECT class_id FROM Classes WHERE class_id = ? AND teacher_id = ?',
+    [classId, person_id]
+  );
+  if (rows.length === 0)
+    return res.status(403).json({ message: 'Không có quyền xóa lớp này' });
+
+  await pool.query('DELETE FROM Classes WHERE class_id = ?', [classId]);
+  res.json({ message: 'Xóa lớp thành công' });
+};
+
+// GET /api/courses — all courses (for dropdown)
+const getCourses = async (req, res) => {
+  const [rows] = await pool.query('SELECT * FROM Courses ORDER BY course_code');
+  res.json(rows);
+};
+
+// GET /api/courses/:code
+const getCourseByCode = async (req, res) => {
+  const [rows] = await pool.query(
+    'SELECT * FROM Courses WHERE course_code = ?',
+    [req.params.code]
+  );
+  if (rows.length === 0) return res.status(404).json({ message: 'Không tìm thấy môn học' });
+  res.json(rows[0]);
+};
+
+module.exports = { getMyClasses, getSchedule, createClass, updateClass, deleteClass, getCourses, getCourseByCode };
+
+// database connection pool using mysql2/promise
+// location: backend/src/db/db.js
+const mysql = require('mysql2/promise');
+require('dotenv').config();
+
+const pool = mysql.createPool({
+  host: process.env.DB_HOST || 'localhost',
+  user: process.env.DB_USER || 'root',
+  password: process.env.DB_PASSWORD || '',
+  database: process.env.DB_NAME || 'course_registration',
+  waitForConnections: true,
+  connectionLimit: 10,
+  queueLimit: 0,
+  charset: 'utf8mb4',
+});
+
+module.exports = pool;
+// initalize database: create tables and set up admin account
+// location: backend/src/db/init.js
+const mysql = require('mysql2/promise');
+const bcrypt = require('bcryptjs');
+const fs = require('fs');
+const path = require('path');
+require('dotenv').config();
+
+async function initDb() {
+  const conn = await mysql.createConnection({
+    host: process.env.DB_HOST || 'localhost',
+    user: process.env.DB_USER || 'root',
+    password: process.env.DB_PASSWORD || '',
+    multipleStatements: true,
+  });
+
+  console.log('✅ Connected to MySQL');
+
+  // Run schema - FIX: path is relative to THIS file (src/db/)
+  const schema = fs.readFileSync(
+    path.join(__dirname, 'schema.sql'),
+    'utf-8'
+  );
+  await conn.query(schema);
+  console.log('✅ Schema applied');
+
+  // Hash admin password and upsert
+  const adminPass = await bcrypt.hash(
+    process.env.ADMIN_PASSWORD || 'admin123',
+    10
+  );
+  await conn.query(
+    `UPDATE Users SET password = ? WHERE person_id = 'admin001'`,
+    [adminPass]
+  );
+  console.log('✅ Admin account ready (email: admin@school.edu.vn, pass: admin123)');
+
+  await conn.end();
+  console.log('🎉 Database initialized successfully!');
+}
+
+initDb().catch((err) => {
+  console.error('❌ DB init failed:', err.message);
+  process.exit(1);
+});
+
+-- location: backend/src/db/schema.sql
+
+
+-- =============================================
+-- COURSE REGISTRATION SYSTEM - DATABASE SCHEMA
+-- =============================================
+
+CREATE DATABASE IF NOT EXISTS course_registration CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+USE course_registration;
+
+-- =============================================
+-- STATIC DATA: Courses (môn học)
+-- =============================================
+CREATE TABLE IF NOT EXISTS Courses (
+    course_code VARCHAR(20) PRIMARY KEY,
+    course_name VARCHAR(255) NOT NULL,
+    credits INT NOT NULL,
+    department VARCHAR(100) NOT NULL
+);
+
+-- =============================================
+-- SYSTEM STATE
+-- =============================================
+CREATE TABLE IF NOT EXISTS SystemState (
+    id INT PRIMARY KEY DEFAULT 1,
+    current_stage ENUM('create_class', 'register_class', 'lock_class', 'scheduled_class') NOT NULL DEFAULT 'create_class',
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+);
+
+-- =============================================
+-- USERS
+-- =============================================
+CREATE TABLE IF NOT EXISTS Users (
+    person_id VARCHAR(50) PRIMARY KEY,
+    email VARCHAR(255) NOT NULL UNIQUE,
+    password VARCHAR(255) NOT NULL,
+    full_name VARCHAR(255),
+    role ENUM('admin', 'teacher', 'student') NOT NULL DEFAULT 'student',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- =============================================
+-- CLASSES (lớp học)
+-- =============================================
+CREATE TABLE IF NOT EXISTS Classes (
+    class_id INT AUTO_INCREMENT PRIMARY KEY,
+    course_code VARCHAR(20) NOT NULL,
+    teacher_id VARCHAR(50) NOT NULL,
+    day_of_week VARCHAR(100) NOT NULL,
+    start_time TIME NOT NULL,
+    end_time TIME NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (course_code) REFERENCES Courses(course_code) ON DELETE CASCADE,
+    FOREIGN KEY (teacher_id) REFERENCES Users(person_id) ON DELETE CASCADE
+);
+
+-- =============================================
+-- ENROLLMENTS (đăng ký môn học)
+-- =============================================
+CREATE TABLE IF NOT EXISTS Enrollments (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    student_id VARCHAR(50) NOT NULL,
+    class_id INT NOT NULL,
+    status ENUM('enrolled', 'payed') NOT NULL DEFAULT 'enrolled',
+    payment_requested BOOLEAN DEFAULT FALSE,
+    enrolled_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY unique_enrollment (student_id, class_id),
+    FOREIGN KEY (student_id) REFERENCES Users(person_id) ON DELETE CASCADE,
+    FOREIGN KEY (class_id) REFERENCES Classes(class_id) ON DELETE CASCADE
+);
+
+-- =============================================
+-- SEED DATA: System State
+-- =============================================
+INSERT INTO SystemState (id, current_stage) VALUES (1, 'create_class')
+ON DUPLICATE KEY UPDATE id = id;
+
+-- =============================================
+-- SEED DATA: Admin account
+-- =============================================
+INSERT INTO Users (person_id, email, password, full_name, role) VALUES
+('admin001', 'admin@school.edu.vn', '$2b$10$YourHashedPasswordHere', 'Quản Trị Viên', 'admin')
+ON DUPLICATE KEY UPDATE person_id = person_id;
+-- NOTE: password = "admin123" hashed at seed time by init script
+
+-- =============================================
+-- SEED DATA: Courses (Static - không xóa khi reset)
+-- =============================================
+INSERT INTO Courses (course_code, course_name, credits, department) VALUES
+('CS101', 'Nhập môn Lập trình', 3, 'Công nghệ thông tin'),
+('CS102', 'Cấu trúc Dữ liệu & Giải thuật', 3, 'Công nghệ thông tin'),
+('CS201', 'Lập trình Hướng đối tượng', 3, 'Công nghệ thông tin'),
+('CS202', 'Cơ sở Dữ liệu', 3, 'Công nghệ thông tin'),
+('CS301', 'Mạng Máy tính', 3, 'Công nghệ thông tin'),
+('CS302', 'Trí tuệ Nhân tạo', 3, 'Công nghệ thông tin'),
+('CS303', 'Lập trình Web', 3, 'Công nghệ thông tin'),
+('CS401', 'Kiến trúc Máy tính', 3, 'Công nghệ thông tin'),
+('MATH101', 'Giải tích 1', 4, 'Toán - Tin học'),
+('MATH102', 'Giải tích 2', 4, 'Toán - Tin học'),
+('MATH201', 'Đại số Tuyến tính', 3, 'Toán - Tin học'),
+('MATH202', 'Xác suất & Thống kê', 3, 'Toán - Tin học'),
+('PHYS101', 'Vật lý Đại cương 1', 3, 'Vật lý'),
+('PHYS102', 'Vật lý Đại cương 2', 3, 'Vật lý'),
+('ENG101', 'Tiếng Anh Cơ bản', 3, 'Ngoại ngữ'),
+('ENG201', 'Tiếng Anh Chuyên ngành', 3, 'Ngoại ngữ'),
+('ECON101', 'Kinh tế Vi mô', 3, 'Kinh tế'),
+('ECON102', 'Kinh tế Vĩ mô', 3, 'Kinh tế'),
+('MGT101', 'Quản trị Học', 3, 'Quản trị Kinh doanh'),
+('LAW101', 'Pháp luật Đại cương', 2, 'Luật')
+ON DUPLICATE KEY UPDATE course_code = course_code;
+
+// location: backend/src/middleware/auth.js
+
+const jwt = require('jsonwebtoken');
+
+const authenticate = (req, res, next) => {
+  const authHeader = req.headers['authorization'];
+  const token = authHeader && authHeader.split(' ')[1];
+  if (!token) return res.status(401).json({ message: 'Unauthorized: No token' });
+
+  try {
+    const decoded = jwt.verify(token, process.env.JWT_SECRET || 'secret');
+    req.user = decoded;
+    next();
+  } catch {
+    return res.status(403).json({ message: 'Forbidden: Invalid token' });
+  }
+};
+
+const requireRole = (...roles) => (req, res, next) => {
+  if (!req.user || !roles.includes(req.user.role)) {
+    return res.status(403).json({ message: 'Forbidden: Insufficient role' });
+  }
+  next();
+};
+
+module.exports = { authenticate, requireRole };
+
+// location: backend/src/middleware/stageCheck.js
+// Middleware kiểm tra giai đoạn hệ thống trước khi cho phép thực hiện action
+const pool = require('../config/db');
+
+/**
+ * requireStage(...stages) — chỉ cho qua nếu current_stage nằm trong danh sách cho phép
+ * Dùng trên từng route nếu cần kiểm soát chặt hơn phía controller
+ */
+const requireStage = (...allowedStages) => async (req, res, next) => {
+  try {
+    const [rows] = await pool.query('SELECT current_stage FROM SystemState WHERE id = 1');
+    const currentStage = rows[0]?.current_stage;
+    if (!allowedStages.includes(currentStage)) {
+      return res.status(403).json({
+        message: `Hành động này không khả dụng ở giai đoạn hiện tại (${currentStage})`,
+        current_stage: currentStage,
+        allowed_stages: allowedStages,
+      });
+    }
+    req.currentStage = currentStage;
+    next();
+  } catch (err) {
+    console.error('stageCheck error:', err);
+    return res.status(500).json({ message: 'Lỗi kiểm tra giai đoạn hệ thống' });
+  }
+};
+
+module.exports = { requireStage };
+
+// location: backend/src/routes/adminRoutes.js
+
+const express = require('express');
+const router = express.Router();
+const { getStage, nextStage, getPaymentRequests, approvePayment } = require('../controllers/adminController');
+const { authenticate, requireRole } = require('../middleware/auth');
+
+router.use(authenticate, requireRole('admin'));
+
+router.get('/stage', getStage);
+router.post('/stage/next', nextStage);
+router.get('/payment-requests', getPaymentRequests);
+router.post('/approve-payment/:studentId', approvePayment);
+
+module.exports = router;
+
+// location: backend/src/routes/authRoutes.js
+
+const express = require('express');
+const router = express.Router();
+const { register, login } = require('../controllers/authController');
+
+router.post('/register', register);
+router.post('/login', login);
+
+module.exports = router;
+
+// location: backend/src/routes/studentRoute.js
+
+const express = require('express');
+const router = express.Router();
+const {
+  getCatalog, getEnrollments, getSchedule, enroll, cancelEnroll,
+  getTuition, requestPayment, getDepartments
+} = require('../controllers/studentController');
+const { authenticate, requireRole } = require('../middleware/auth');
+
+router.use(authenticate, requireRole('student'));
+
+router.get('/catalog', getCatalog);
+router.get('/enrollments', getEnrollments);
+router.get('/schedule', getSchedule);
+router.post('/enroll', enroll);
+router.delete('/enroll/:classId', cancelEnroll);
+router.get('/tuition', getTuition);
+router.post('/request-payment', requestPayment);
+router.get('/departments', getDepartments);
+
+module.exports = router;
+
+// location: backend/src/routes/teacherRoutes.js
+
+const express = require('express');
+const router = express.Router();
+const {
+  getMyClasses, getSchedule, createClass, updateClass, deleteClass,
+  getCourses, getCourseByCode
+} = require('../controllers/teacherController');
+const { authenticate, requireRole } = require('../middleware/auth');
+
+// Course lookup (accessible to all authenticated users for dropdown)
+router.get('/courses', authenticate, getCourses);
+router.get('/courses/:code', authenticate, getCourseByCode);
+
+// Teacher-only routes
+router.get('/teacher/classes', authenticate, requireRole('teacher'), getMyClasses);
+router.get('/teacher/schedule', authenticate, requireRole('teacher'), getSchedule);
+router.post('/teacher/classes', authenticate, requireRole('teacher'), createClass);
+router.put('/teacher/classes/:classId', authenticate, requireRole('teacher'), updateClass);
+router.delete('/teacher/classes/:classId', authenticate, requireRole('teacher'), deleteClass);
+
+module.exports = router;
+
+// location: backend/src/server.js
+
+const express = require('express');
+const cors = require('cors');
+require('dotenv').config();
+
+const authRoutes = require('./routes/authRoutes');
+const adminRoutes = require('./routes/adminRoutes');
+const teacherRoutes = require('./routes/teacherRoutes');
+const studentRoutes = require('./routes/studentRoutes');
+
+const app = express();
+app.use(cors());
+app.use(express.json());
+
+// Health check
+app.get('/api/health', (req, res) => res.json({ status: 'ok' }));
+
+// Routes
+app.use('/api/auth', authRoutes);
+app.use('/api/admin', adminRoutes);
+app.use('/api', teacherRoutes);
+app.use('/api/student', studentRoutes);
+
+// Global error handler
+app.use((err, req, res, next) => {
+  console.error(err.stack);
+  res.status(500).json({ message: 'Internal server error' });
+});
+
+const PORT = process.env.PORT || 5000;
+app.listen(PORT, () => {
+  console.log(`🚀 Backend running on http://localhost:${PORT}`);
+});
+
+no backend .env, .gitignore, 
+
+{
+  "name": "course-registration-backend",
+  "version": "1.0.0",
+  "description": "Course Registration & Tuition System - Backend API",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "nodemon src/server.js",
+    "init-db": "node src/db/init.js"
+  },
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "jsonwebtoken": "^9.0.2",
+    "mysql2": "^3.10.1"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.4"
+  }
+}
+
+{
+  "name": "course-registration-frontend",
+  "version": "1.0.0",
+  "private": true,
+  "dependencies": {
+    "axios": "^1.7.2",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-router-dom": "^6.24.0",
+    "react-scripts": "5.0.1"
+  },
+  "scripts": {
+    "start": "react-scripts start",
+    "build": "react-scripts build"
+  },
+  "browserslist": {
+    "production": [">0.2%", "not dead", "not op_mini all"],
+    "development": ["last 1 chrome version", "last 1 firefox version", "last 1 safari version"]
+  },
+  "proxy": "http://localhost:5000"
+}
+
+ for frontend, no .env
+
+ gitignore for frontend:
+ node_modules/
+build/
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+<!-- location: frontend/index.html -->
+ <!DOCTYPE html>
+<html lang="vi">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#6366f1" />
+    <meta name="description" content="Hệ thống Đăng ký Học phần và Thu học phí" />
+    <title>Đăng ký Học phần</title>
+  </head>
+  <body>
+    <noscript>Ứng dụng này yêu cầu JavaScript được bật.</noscript>
+    <div id="root"></div>
+  </body>
+</html>
+no api files, components. 
+
+// location: frontend/src/context/AuthContext.js
+
+import React, { createContext, useContext, useState, useEffect } from 'react';
+
+const AuthContext = createContext(null);
+
+export const AuthProvider = ({ children }) => {
+  const [user, setUser] = useState(null);
+  const [stage, setStage] = useState('create_class');
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const token = localStorage.getItem('token');
+    const userData = localStorage.getItem('user');
+    const stageData = localStorage.getItem('stage');
+    if (token && userData) {
+      setUser(JSON.parse(userData));
+      setStage(stageData || 'create_class');
+    }
+    setLoading(false);
+  }, []);
+
+  const login = (userData, token, currentStage) => {
+    localStorage.setItem('token', token);
+    localStorage.setItem('user', JSON.stringify(userData));
+    localStorage.setItem('stage', currentStage);
+    setUser(userData);
+    setStage(currentStage);
+  };
+
+  const logout = () => {
+    localStorage.clear();
+    setUser(null);
+    setStage('create_class');
+  };
+
+  const updateStage = (newStage) => {
+    localStorage.setItem('stage', newStage);
+    setStage(newStage);
+  };
+
+  return (
+    <AuthContext.Provider value={{ user, stage, loading, login, logout, updateStage }}>
+      {children}
+    </AuthContext.Provider>
+  );
+};
+
+export const useAuth = () => useContext(AuthContext);
+
+no pages and styles folder, no app.js and 
+
+// location: frontend/src/index.js
+import React from 'react';
+import ReactDOM from 'react-dom/client';
+import './styles/index.css';
+import App from './App';
+import { AuthProvider } from './context/AuthContext';
+
+const root = ReactDOM.createRoot(document.getElementById('root'));
+root.render(
+  <React.StrictMode>
+    <AuthProvider>
+      <App />
+    </AuthProvider>
+  </React.StrictMode>
+);
+
+{
+  "name": "course-registration-frontend",
+  "version": "1.0.0",
+  "private": true,
+  "dependencies": {
+    "axios": "^1.7.2",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-router-dom": "^6.24.0",
+    "react-scripts": "5.0.1"
+  },
+  "scripts": {
+    "start": "react-scripts start",
+    "build": "react-scripts build"
+  },
+  "browserslist": {
+    "production": [">0.2%", "not dead", "not op_mini all"],
+    "development": ["last 1 chrome version", "last 1 firefox version", "last 1 safari version"]
+  },
+  "proxy": "http://localhost:5000"
+}
+
+// location: frontend/src/index.js
+import axios from 'axios';
+
+const api = axios.create({
+  baseURL: '/api',
+});
+
+api.interceptors.request.use((config) => {
+  const token = localStorage.getItem('token');
+  if (token) config.headers.Authorization = `Bearer ${token}`;
+  return config;
+});
+
+api.interceptors.response.use(
+  (res) => res,
+  (err) => {
+    if (err.response?.status === 401) {
+      localStorage.clear();
+      window.location.href = '/login';
+    }
+    return Promise.reject(err);
+  }
+);
+
+// Auth
+export const authAPI = {
+  login: (data) => api.post('/auth/login', data),
+  register: (data) => api.post('/auth/register', data),
+};
+
+// Admin
+export const adminAPI = {
+  getStage: () => api.get('/admin/stage'),
+  nextStage: () => api.post('/admin/stage/next'),
+  getPaymentRequests: () => api.get('/admin/payment-requests'),
+  approvePayment: (studentId) => api.post(`/admin/approve-payment/${studentId}`),
+};
+
+// Teacher
+export const teacherAPI = {
+  getClasses: () => api.get('/teacher/classes'),
+  getSchedule: () => api.get('/teacher/schedule'),
+  createClass: (data) => api.post('/teacher/classes', data),
+  updateClass: (id, data) => api.put(`/teacher/classes/${id}`, data),
+  deleteClass: (id) => api.delete(`/teacher/classes/${id}`),
+};
+
+// Courses
+export const courseAPI = {
+  getAll: () => api.get('/courses'),
+  getByCode: (code) => api.get(`/courses/${code}`),
+};
+
+// Student
+export const studentAPI = {
+  getCatalog: (params) => api.get('/student/catalog', { params }),
+  getEnrollments: () => api.get('/student/enrollments'),
+  getSchedule: () => api.get('/student/schedule'),
+  enroll: (class_id) => api.post('/student/enroll', { class_id }),
+  cancelEnroll: (classId) => api.delete(`/student/enroll/${classId}`),
+  getTuition: () => api.get('/student/tuition'),
+  requestPayment: () => api.post('/student/request-payment'),
+  getDepartments: () => api.get('/student/departments'),
+};
+
+export default api;
+
+// location: frontend/src/App.js\
+import React from 'react';
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { useAuth } from './context/AuthContext';
+import LoginPage from './pages/LoginPage';
+import RegisterPage from './pages/RegisterPage';
+import AdminDashboard from './pages/AdminDashboard';
+import TeacherDashboard from './pages/TeacherDashboard';
+import StudentDashboard from './pages/StudentDashboard';
+
+function PrivateRoute({ children, roles }) {
+  const { user, loading } = useAuth();
+  if (loading) return <div className="loading">Đang tải...</div>;
+  if (!user) return <Navigate to="/login" replace />;
+  if (roles && !roles.includes(user.role)) return <Navigate to="/login" replace />;
+  return children;
+}
+
+function RootRedirect() {
+  const { user, loading } = useAuth();
+  if (loading) return <div className="loading">Đang tải...</div>;
+  if (!user) return <Navigate to="/login" replace />;
+  if (user.role === 'admin') return <Navigate to="/admin" replace />;
+  if (user.role === 'teacher') return <Navigate to="/teacher" replace />;
+  return <Navigate to="/student" replace />;
+}
+
+export default function App() {
+  return (
+    <BrowserRouter>
+      <Routes>
+        <Route path="/" element={<RootRedirect />} />
+        <Route path="/login" element={<LoginPage />} />
+        <Route path="/register" element={<RegisterPage />} />
+        <Route
+          path="/admin"
+          element={
+            <PrivateRoute roles={['admin']}>
+              <AdminDashboard />
+            </PrivateRoute>
+          }
+        />
+        <Route
+          path="/teacher"
+          element={
+            <PrivateRoute roles={['teacher']}>
+              <TeacherDashboard />
+            </PrivateRoute>
+          }
+        />
+        <Route
+          path="/student"
+          element={
+            <PrivateRoute roles={['student']}>
+              <StudentDashboard />
+            </PrivateRoute>
+          }
+        />
+        <Route path="*" element={<Navigate to="/login" replace />} />
+      </Routes>
+    </BrowserRouter>
+  );
+}
