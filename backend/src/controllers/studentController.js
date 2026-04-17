@@ -9,7 +9,7 @@ const getCatalog = async (req, res) => {
   const { department, credits, course_code } = req.query;
 
   let whereClause = '1=1';
-  const params = [person_id];
+  // const params = [person_id];
   const filterParams = [];
 
   // Composite condition (e): filter by department AND/OR credits
