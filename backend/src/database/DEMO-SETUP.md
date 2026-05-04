@@ -78,8 +78,8 @@ DB_NAME=course_registration_demo npm run dev
 -- MySQL command line:
 DROP DATABASE course_registration_demo;
 CREATE DATABASE course_registration_demo;
-mysql -u root -p course_registration_demo < backend/src/db/schema.sql
-mysql -u root -p course_registration_demo < backend/src/db/demo-data.sql
+mysql -u root -p course_registration_demo < backend/src/database/schema.sql
+mysql -u root -p course_registration_demo < backend/src/database/demo-data.sql
 ```
 
 Or via npm:
@@ -117,7 +117,7 @@ All demo accounts are set up with default passwords after running `npm run init-
 
 ## File References
 
-- Schema: `backend/src/db/schema.sql`
-- Demo Data: `backend/src/db/demo-data.sql`
-- Demo Loader: `backend/src/db/init-demo.js`
+- Schema: `backend/src/database/schema.sql`
+- Demo Data: `backend/src/database/demo-data.sql`
+- Demo Loader: `backend/src/database/init-demo.js`
 - Documentation: `document/database-guide.md`

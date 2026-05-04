@@ -1,11 +1,5 @@
-// location: backend/src/middleware/stageCheck.js
-// Middleware kiểm tra giai đoạn hệ thống trước khi cho phép thực hiện action
-const pool = require('../config/db');
+const pool = require('../database/pool');
 
-/**
- * requireStage(...stages) — chỉ cho qua nếu current_stage nằm trong danh sách cho phép
- * Dùng trên từng route nếu cần kiểm soát chặt hơn phía controller
- */
 const requireStage = (...allowedStages) => async (req, res, next) => {
   try {
     const [rows] = await pool.query('SELECT current_stage FROM SystemState WHERE id = 1');
@@ -18,7 +12,7 @@ const requireStage = (...allowedStages) => async (req, res, next) => {
       });
     }
     req.currentStage = currentStage;
-    next();
+    return next();
   } catch (err) {
     console.error('stageCheck error:', err);
     return res.status(500).json({ message: 'Lỗi kiểm tra giai đoạn hệ thống' });

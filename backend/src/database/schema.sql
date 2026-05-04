@@ -1,12 +1,6 @@
--- location: backend/src/db/schema.sql
-
-
 -- =============================================
 -- COURSE REGISTRATION SYSTEM - DATABASE SCHEMA
 -- =============================================
-
-CREATE DATABASE IF NOT EXISTS course_registration CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-USE course_registration;
 
 -- =============================================
 -- STATIC DATA: Courses (môn học)
@@ -88,7 +82,6 @@ ON DUPLICATE KEY UPDATE id = id;
 INSERT INTO Users (person_id, email, password, full_name, role) VALUES
 ('admin001', 'admin@school.edu.vn', '$2b$10$YourHashedPasswordHere', 'Quản Trị Viên', 'admin')
 ON DUPLICATE KEY UPDATE person_id = person_id;
--- NOTE: password = "admin123" hashed at seed time by init script
 
 -- =============================================
 -- SEED DATA: Courses (Static - không xóa khi reset)
