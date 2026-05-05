@@ -1,7 +1,4 @@
-version: '3.8'
-
 services:
-  # MySQL Database
   mysql-concurrency:
     image: mysql:8.0
     container_name: dbms-mysql-concurrency
@@ -10,8 +7,6 @@ services:
       MYSQL_DATABASE: course_registration
     ports:
       - "3308:3306"
-    volumes:
-      - ./docker/mysql:/docker-entrypoint-initdb.d
     command: 
       - --default-authentication-plugin=mysql_native_password
       - --transaction-isolation=REPEATABLE-READ
@@ -21,7 +16,6 @@ services:
       retries: 10
       interval: 10s
 
-  # MongoDB Database with Replica Set
   mongodb-concurrency:
     image: mongo:7
     container_name: dbms-mongo-concurrency
@@ -29,40 +23,12 @@ services:
       MONGO_INITDB_DATABASE: course_registration
     ports:
       - "27019:27017"
-    volumes:
-      - ./docker/mongo:/docker-entrypoint-initdb.d
     command: mongod --replSet rs0 --bind_ip_all
     healthcheck:
       test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
       timeout: 20s
       retries: 10
       interval: 10s
-
-  # MongoDB Init Replica Set
-  mongodb-init:
-    image: mongo:7
-    container_name: dbms-mongo-init
-    depends_on:
-      mongodb-concurrency:
-        condition: service_healthy
-    entrypoint: >
-      mongosh --host mongodb-concurrency:27017 --eval '
-      if (rs.status().ok == 0) {
-        rs.initiate({
-          _id: "rs0",
-          members: [
-            { _id: 0, host: "mongodb-concurrency:27017" }
-          ]
-        });
-        print("Replica set initialized");
-      } else {
-        print("Replica set already initialized");
-      }
-      '
-
-volumes:
-  mysql_data:
-  mongodb_data:
 
 networks:
   default:

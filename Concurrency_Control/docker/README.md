@@ -9,13 +9,25 @@
 cd Concurrency_Control
 
 # Start services
-docker-compose up -d
+docker compose up -d
 
-# Wait for services to be healthy
-sleep 10
+# Init replica set for MongoDB transactions
+docker exec dbms-mongo-concurrency mongosh --eval "try { rs.status().ok } catch (e) { rs.initiate() }"
 
-# Initialize MySQL
-docker exec dbms-mysql-concurrency mysql -uroot -proot course_registration < docker/mysql/00_schema_seed.sql
+# Seed MySQL (PowerShell)
+Get-Content docker/mysql/00_schema_seed.sql | docker exec -i dbms-mysql-concurrency mysql -uroot -proot course_registration
+
+# Seed MongoDB (PowerShell)
+Get-Content docker/mongo/00_seed.js | docker exec -i dbms-mongo-concurrency mongosh --quiet
+```
+
+For Git Bash / WSL:
+
+```bash
+docker exec dbms-mongo-concurrency mongosh --eval "try { rs.status().ok } catch (e) { rs.initiate() }"
+docker exec -i dbms-mysql-concurrency mysql -uroot -proot course_registration < docker/mysql/00_schema_seed.sql
+docker exec -i dbms-mongo-concurrency mongosh --quiet < docker/mongo/00_seed.js
+```
 
 # Initialize MongoDB
 docker exec dbms-mongo-concurrency mongosh < docker/mongo/00_seed.js
@@ -67,42 +79,39 @@ docker exec -it dbms-mongo-concurrency mongosh
 
 #### MySQL
 ```bash
-docker exec -it dbms-mysql-concurrency mysql -uroot -proot course_registration < docker/mysql/demo-01-mvcc.sql
+Get-Content docker/mysql/demo-01-mvcc.sql | docker exec -i dbms-mysql-concurrency mysql -uroot -proot course_registration
 ```
 
 #### MongoDB
 ```bash
-docker exec -it dbms-mongo-concurrency mongosh
-# Inside mongosh:
-> source("docker/mongo/demo-01-mvcc.js")
+docker cp docker/mongo/demo-01-mvcc.js dbms-mongo-concurrency:/tmp/demo-01-mvcc.js
+docker exec dbms-mongo-concurrency mongosh --quiet /tmp/demo-01-mvcc.js
 ```
 
 ### Demo 2: Row-Level Lock
 
 #### MySQL
 ```bash
-docker exec -it dbms-mysql-concurrency mysql -uroot -proot course_registration < docker/mysql/demo-02-row-level-lock.sql
+Get-Content docker/mysql/demo-02-row-level-lock.sql | docker exec -i dbms-mysql-concurrency mysql -uroot -proot course_registration
 ```
 
 #### MongoDB
 ```bash
-docker exec -it dbms-mongo-concurrency mongosh
-# Inside mongosh:
-> source("docker/mongo/demo-02-row-level-lock.js")
+docker cp docker/mongo/demo-02-row-level-lock.js dbms-mongo-concurrency:/tmp/demo-02-row-level-lock.js
+docker exec dbms-mongo-concurrency mongosh --quiet /tmp/demo-02-row-level-lock.js
 ```
 
 ### Demo 3: Race Condition
 
 #### MySQL
 ```bash
-docker exec -it dbms-mysql-concurrency mysql -uroot -proot course_registration < docker/mysql/demo-03-race-condition.sql
+Get-Content docker/mysql/demo-03-race-condition.sql | docker exec -i dbms-mysql-concurrency mysql -uroot -proot course_registration
 ```
 
 #### MongoDB
 ```bash
-docker exec -it dbms-mongo-concurrency mongosh
-# Inside mongosh:
-> source("docker/mongo/demo-03-race-condition.js")
+docker cp docker/mongo/demo-03-race-condition.js dbms-mongo-concurrency:/tmp/demo-03-race-condition.js
+docker exec dbms-mongo-concurrency mongosh --quiet /tmp/demo-03-race-condition.js
 ```
 
 ---
@@ -162,12 +171,12 @@ Then follow comments in JS files for T1 and T2 sections.
 
 ### Stop containers
 ```bash
-docker-compose down
+docker compose down
 ```
 
 ### Remove containers & images
 ```bash
-docker-compose down -v
+docker compose down -v
 docker rmi mysql:8.0 mongo:7
 ```
 

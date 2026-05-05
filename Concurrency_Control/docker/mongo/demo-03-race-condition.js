@@ -96,22 +96,19 @@ console.log("\n[SAFE - With transaction]");
 
 const session = db.getMongo().startSession();
 session.startTransaction();
+const sdb = session.getDatabase("course_registration");
 
 console.log("T1: START TRANSACTION");
 console.log("T1: Read enrollment (atomic within transaction)");
-const enrollment = db.enrollments.findOne(
-  { student_id: "student001", class_id: 1 },
-  { session: session }
-);
+const enrollment = sdb.enrollments.findOne({ student_id: "student001", class_id: 1 });
 console.log("T1 sees: status = " + enrollment.status);
 
 console.log("\nT1: Check condition");
 if (enrollment.status === "enrolled") {
   console.log("T1: Proceed - Update status");
-  db.enrollments.updateOne(
+  sdb.enrollments.updateOne(
     { _id: enrollment._id },
-    { $set: { status: "payed" } },
-    { session: session }
+    { $set: { status: "payed" } }
   );
   console.log("T1: Payment recorded");
 } else {
@@ -132,12 +129,10 @@ session.endSession();
 console.log("\n[T2 attempts same operation - prevented]");
 const session2 = db.getMongo().startSession();
 session2.startTransaction();
+const sdb2 = session2.getDatabase("course_registration");
 
 console.log("T2: Read enrollment");
-const enrollment2 = db.enrollments.findOne(
-  { student_id: "student001", class_id: 1 },
-  { session: session2 }
-);
+const enrollment2 = sdb2.enrollments.findOne({ student_id: "student001", class_id: 1 });
 console.log("T2 sees: status = " + enrollment2.status);
 
 console.log("T2: Check - status != 'enrolled' - SKIP payment");
@@ -233,33 +228,29 @@ console.log("\n[SAFE - With transaction]");
 
 const session3 = db.getMongo().startSession();
 session3.startTransaction();
+const sdb3 = session3.getDatabase("course_registration");
 
 console.log("T1: START TRANSACTION");
 console.log("T1: Read class");
-const classDoc = db.classes.findOne(
-  { _id: 3 },
-  { session: session3 }
-);
+const classDoc = sdb3.classes.findOne({ _id: 3 });
 console.log("T1: capacity = " + classDoc.capacity + ", enrolled_count = " + classDoc.enrolled_count);
 
 console.log("\nT1: Check capacity");
 if (classDoc.enrolled_count < classDoc.capacity) {
   console.log("T1: Space available - Enroll");
   
-  db.enrollments.insertOne(
+  sdb3.enrollments.insertOne(
     {
       student_id: "student_safe_t1",
       class_id: 3,
       status: "enrolled",
       enrolled_at: new Date()
-    },
-    { session: session3 }
+    }
   );
   
-  db.classes.updateOne(
+  sdb3.classes.updateOne(
     { _id: 3 },
-    { $inc: { enrolled_count: 1 } },
-    { session: session3 }
+    { $inc: { enrolled_count: 1 } }
   );
   
   console.log("T1: Successfully enrolled");
@@ -346,19 +337,17 @@ console.log("\n[SAFE - With version check]");
 
 const session6 = db.getMongo().startSession();
 session6.startTransaction();
+const sdb6 = session6.getDatabase("course_registration");
 
 console.log("T1: Read with version");
-const acctSafe = db.bank_accounts.findOne(
-  { student_id: "student003" },
-  { session: session6 }
-);
+const acctSafe = sdb6.bank_accounts.findOne({ student_id: "student003" });
 console.log("T1: balance = " + acctSafe.balance + ", version = " + acctSafe.version);
 
 console.log("\nT1: Calculate new balance");
 const newBalance = acctSafe.balance + 100000;
 
 console.log("T1: Update with version check");
-const result = db.bank_accounts.updateOne(
+const result = sdb6.bank_accounts.updateOne(
   {
     student_id: "student003",
     version: acctSafe.version
@@ -368,8 +357,7 @@ const result = db.bank_accounts.updateOne(
       balance: newBalance,
       version: acctSafe.version + 1
     }
-  },
-  { session: session6 }
+  }
 );
 
 if (result.modifiedCount === 1) {

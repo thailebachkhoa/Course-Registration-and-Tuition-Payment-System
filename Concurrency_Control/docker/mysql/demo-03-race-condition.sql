@@ -60,11 +60,10 @@ SELECT CONCAT('T1 thay status = ', @current_status) AS T1_read;
 
 -- STEP 3: T1 kiểm tra điều kiện (application level)
 SELECT 'T1: Check: if status == "enrolled"' AS T1_check;
-IF @current_status = 'enrolled' THEN
-  SELECT 'Condition TRUE - Proceed with payment' AS T1_check_result;
-ELSE
-  SELECT 'Condition FALSE - Skip' AS T1_check_result;
-END IF;
+SELECT CASE
+  WHEN @current_status = 'enrolled' THEN 'Condition TRUE - Proceed with payment'
+  ELSE 'Condition FALSE - Skip'
+END AS T1_check_result;
 
 -- STEP 4: T1 update (KHÔNG BIẾT T2 đã update)
 SELECT 'T1: UPDATE status = "payed"' AS T1_update;
@@ -111,13 +110,14 @@ SELECT CONCAT('T1 acquired exclusive lock. Status = ', @fixed_status) AS T1_stat
 -- ============================================================================
 
 SELECT 'T1: Check condition (protected by lock)' AS T1_action;
-IF @fixed_status = 'enrolled' THEN
-  SELECT 'Condition TRUE - Proceed with payment (protected)' AS T1_result;
-  UPDATE Enrollments SET status = 'payed' WHERE id = @fixed_id;
-ELSE
-  SELECT 'Condition FALSE - Rollback' AS T1_result;
-  ROLLBACK;
-END IF;
+UPDATE Enrollments
+SET status = 'payed'
+WHERE id = @fixed_id AND @fixed_status = 'enrolled';
+SET @fixed_update_rows = ROW_COUNT();
+SELECT CASE
+  WHEN @fixed_update_rows = 1 THEN 'Condition TRUE - Proceed with payment (protected)'
+  ELSE 'Condition FALSE - Skip'
+END AS T1_result;
 
 COMMIT;
 SELECT 'T1: COMMIT - No race condition!' AS T1_action;
@@ -134,6 +134,11 @@ SELECT 'T1: COMMIT - No race condition!' AS T1_action;
 -- ============================================================================
 
 SELECT 'DEMO 3: Race Condition - Over-enrollment' AS section;
+INSERT IGNORE INTO Users (person_id, email, full_name, role)
+VALUES
+('student_new_t1', 'student_new_t1@school.edu.vn', 'Student New T1', 'student'),
+('student_safe_t1', 'student_safe_t1@school.edu.vn', 'Student Safe T1', 'student');
+
 SELECT 'Class 1 current state:' AS step;
 SELECT class_id, capacity, enrolled_count FROM Classes WHERE class_id = 1;
 SELECT COUNT(*) as enrolled_students FROM Enrollments WHERE class_id = 1;
@@ -146,20 +151,21 @@ START TRANSACTION;
 SELECT @capacity := capacity, @current_enrolled := enrolled_count
 FROM Classes WHERE class_id = 1;
 
-SELECT CONCAT('T1: Current enrolled = ', @current_enrolled, ', Capacity = ', @capacity) AS check;
+SELECT CONCAT('T1: Current enrolled = ', @current_enrolled, ', Capacity = ', @capacity) AS check_info;
 
 -- ============================================================================
 -- [T2, T3, T4 cùng do giống T1 tại đây - all see same count]
 -- ============================================================================
 
 SELECT 'T1: IF current_enrolled < capacity' AS logic;
-IF @current_enrolled < @capacity THEN
-  SELECT 'INSERT INTO Enrollments' AS action;
-  INSERT INTO Enrollments (student_id, class_id, status)
-  VALUES ('student_new_t1', 1, 'enrolled');
-  
-  UPDATE Classes SET enrolled_count = enrolled_count + 1 WHERE class_id = 1;
-END IF;
+INSERT INTO Enrollments (student_id, class_id, status)
+SELECT 'student_new_t1', 1, 'enrolled'
+FROM DUAL
+WHERE @current_enrolled < @capacity;
+SET @unsafe_insert_rows = ROW_COUNT();
+UPDATE Classes
+SET enrolled_count = enrolled_count + 1
+WHERE class_id = 1 AND @unsafe_insert_rows = 1;
 
 COMMIT;
 
@@ -187,19 +193,20 @@ FROM Classes
 WHERE class_id = 1
 FOR UPDATE;
 
-SELECT CONCAT('T1: Locked. Current enrolled = ', @enr, ', Capacity = ', @cap) AS check;
+SELECT CONCAT('T1: Locked. Current enrolled = ', @enr, ', Capacity = ', @cap) AS check_info;
 
-IF @enr < @cap THEN
-  SELECT 'INSERT - Protected by lock' AS action;
-  INSERT INTO Enrollments (student_id, class_id, status)
-  VALUES ('student_safe_t1', 1, 'enrolled');
-  
-  UPDATE Classes SET enrolled_count = enrolled_count + 1 WHERE class_id = 1;
-  SELECT 'Successfully enrolled' AS result;
-ELSE
-  SELECT 'Class FULL - Cannot enroll' AS result;
-  ROLLBACK;
-END IF;
+INSERT INTO Enrollments (student_id, class_id, status)
+SELECT 'student_safe_t1', 1, 'enrolled'
+FROM DUAL
+WHERE @enr < @cap;
+SET @safe_insert_rows = ROW_COUNT();
+UPDATE Classes
+SET enrolled_count = enrolled_count + 1
+WHERE class_id = 1 AND @safe_insert_rows = 1;
+SELECT CASE
+  WHEN @safe_insert_rows = 1 THEN 'Successfully enrolled'
+  ELSE 'Class FULL - Cannot enroll'
+END AS result;
 
 COMMIT;
 
@@ -274,14 +281,12 @@ UPDATE BankAccounts
 SET balance = @new_balance, version = version + 1
 WHERE student_id = 'student001' AND version = @prev_version;
 
-SELECT ROW_COUNT() as rows_affected;
-
-IF ROW_COUNT() = 1 THEN
-  SELECT 'Update successful - version not changed' AS result;
-ELSE
-  SELECT 'Update failed - version changed (concurrent update detected)' AS result;
-  ROLLBACK;
-END IF;
+SET @optimistic_rows = ROW_COUNT();
+SELECT @optimistic_rows as rows_affected;
+SELECT CASE
+  WHEN @optimistic_rows = 1 THEN 'Update successful - version not changed'
+  ELSE 'Update failed - version changed (concurrent update detected)'
+END AS result;
 
 COMMIT;
 

@@ -22,12 +22,12 @@ db.bank_accounts.findOne({ student_id: "student001" });
 console.log("\n=== STEP 2: T1 START TRANSACTION ===");
 const session = db.getMongo().startSession();
 session.startTransaction();
+const sdb = session.getDatabase("course_registration");
 
 // T1 đọc balance lần 1
 console.log("T1: Doc balance lan 1");
-const initialDoc = db.bank_accounts.findOne(
-  { student_id: "student001" },
-  { session: session }
+const initialDoc = sdb.bank_accounts.findOne(
+  { student_id: "student001" }
 );
 console.log("T1 nhin thay: balance = " + initialDoc.balance + ", version = " + initialDoc.version);
 
@@ -41,9 +41,8 @@ console.log("T1 nhin thay: balance = " + initialDoc.balance + ", version = " + i
 
 // STEP 3: T1 đọc lại cùng dữ liệu
 console.log("\nT1: Doc balance lan 2 (sau khi T2 update)");
-const secondRead = db.bank_accounts.findOne(
-  { student_id: "student001" },
-  { session: session }
+const secondRead = sdb.bank_accounts.findOne(
+  { student_id: "student001" }
 );
 console.log("T1 van nhin thay: balance = " + secondRead.balance + " (snapshot isolation)");
 
@@ -78,9 +77,10 @@ console.log("Initial count: " + initialCount);
 console.log("\nT1: START TRANSACTION");
 const session2 = db.getMongo().startSession();
 session2.startTransaction();
+const sdb2 = session2.getDatabase("course_registration");
 
 console.log("T1: Dem enrollments co status='enrolled' lan 1");
-const count1 = db.enrollments.countDocuments({ status: "enrolled" }, { session: session2 });
+const count1 = sdb2.enrollments.countDocuments({ status: "enrolled" });
 console.log("T1 dem duoc: " + count1);
 
 // ============================================================================
@@ -89,7 +89,7 @@ console.log("T1 dem duoc: " + count1);
 // ============================================================================
 
 console.log("\nT1: Dem enrollments co status='enrolled' lan 2 (sau T2 delete)");
-const count2 = db.enrollments.countDocuments({ status: "enrolled" }, { session: session2 });
+const count2 = sdb2.enrollments.countDocuments({ status: "enrolled" });
 console.log("T1 van dem duoc: " + count2 + " (MVCC consistent snapshot)");
 
 console.log("\nT1: COMMIT");
@@ -122,13 +122,13 @@ console.log("Initial aggregate: " + JSON.stringify(initialAggregate[0]));
 console.log("\nT1: START TRANSACTION");
 const session3 = db.getMongo().startSession();
 session3.startTransaction();
+const sdb3 = session3.getDatabase("course_registration");
 
 console.log("T1: Run aggregation pipeline");
-const agg1 = db.bank_accounts.aggregate(
+const agg1 = sdb3.bank_accounts.aggregate(
   [
     { $group: { _id: null, total_balance: { $sum: "$balance" }, count: { $sum: 1 } } }
   ],
-  { session: session3 }
 ).toArray();
 console.log("T1 thay: " + JSON.stringify(agg1[0]));
 
@@ -142,11 +142,10 @@ console.log("T1 thay: " + JSON.stringify(agg1[0]));
 // ============================================================================
 
 console.log("\nT1: Run aggregation pipeline lan 2 (sau T2 insert)");
-const agg2 = db.bank_accounts.aggregate(
+const agg2 = sdb3.bank_accounts.aggregate(
   [
     { $group: { _id: null, total_balance: { $sum: "$balance" }, count: { $sum: 1 } } }
   ],
-  { session: session3 }
 ).toArray();
 console.log("T1 van thay: " + JSON.stringify(agg2[0]) + " (snapshot isolation)");
 
@@ -190,12 +189,10 @@ const session4 = db.getMongo().startSession({
   readConcern: { level: "snapshot" }
 });
 session4.startTransaction();
+const sdb4 = session4.getDatabase("course_registration");
 
 console.log("T1: Read with snapshot read concern");
-const doc1 = db.bank_accounts.findOne(
-  { student_id: "student002" },
-  { session: session4 }
-);
+const doc1 = sdb4.bank_accounts.findOne({ student_id: "student002" });
 console.log("T1: Read " + JSON.stringify(doc1));
 
 // ============================================================================
@@ -207,10 +204,7 @@ console.log("T1: Read " + JSON.stringify(doc1));
 // ============================================================================
 
 console.log("\nT1: Read again within same transaction");
-const doc2 = db.bank_accounts.findOne(
-  { student_id: "student002" },
-  { session: session4 }
-);
+const doc2 = sdb4.bank_accounts.findOne({ student_id: "student002" });
 console.log("T1: Read (same snapshot) " + JSON.stringify(doc2));
 
 console.log("\nT1: COMMIT");
@@ -241,9 +235,10 @@ console.log("Students: " + classEnrollments.map(e => e.student_id).join(", "));
 console.log("\nT1: START TRANSACTION");
 const session5 = db.getMongo().startSession();
 session5.startTransaction();
+const sdb5 = session5.getDatabase("course_registration");
 
 console.log("T1: Query enrollments o class_id=1 lan 1");
-let result1 = db.enrollments.find({ class_id: 1 }, { session: session5 }).toArray();
+let result1 = sdb5.enrollments.find({ class_id: 1 }).toArray();
 console.log("T1 tim thay: " + result1.length + " enrollments");
 
 // ============================================================================
@@ -256,7 +251,7 @@ console.log("T1 tim thay: " + result1.length + " enrollments");
 // ============================================================================
 
 console.log("\nT1: Query enrollments o class_id=1 lan 2 (sau T2 insert)");
-let result2 = db.enrollments.find({ class_id: 1 }, { session: session5 }).toArray();
+let result2 = sdb5.enrollments.find({ class_id: 1 }).toArray();
 console.log("T1 van tim thay: " + result2.length + " enrollments (no phantom read)");
 
 console.log("\nT1: COMMIT");

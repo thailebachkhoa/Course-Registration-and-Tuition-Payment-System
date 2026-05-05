@@ -33,12 +33,10 @@ db.bank_accounts.find().forEach(doc => console.log("  " + doc.student_id + ": " 
 console.log("\nT1: START TRANSACTION (acquire logical lock)");
 const session1 = db.getMongo().startSession();
 session1.startTransaction();
+const sdb1 = session1.getDatabase("course_registration");
 
 console.log("T1: Read account (within transaction)");
-const account1 = db.bank_accounts.findOne(
-  { student_id: "student001" },
-  { session: session1 }
-);
+const account1 = sdb1.bank_accounts.findOne({ student_id: "student001" });
 console.log("T1 reads: " + account1.student_id + " balance = " + account1.balance);
 
 console.log("T1: Hold lock, sleeping...");
@@ -56,10 +54,9 @@ console.log("T1: Hold lock, sleeping...");
 // ============================================================================
 
 console.log("\nT1: Perform update (still in transaction)");
-db.bank_accounts.updateOne(
+sdb1.bank_accounts.updateOne(
   { student_id: "student001", version: account1.version },
-  { $set: { balance: account1.balance + 50000, version: account1.version + 1 } },
-  { session: session1 }
+  { $set: { balance: account1.balance + 50000, version: account1.version + 1 } }
 );
 console.log("T1: Updated balance for student001");
 
@@ -95,11 +92,9 @@ console.log("T1 & T2 both read same document:");
 
 const session2 = db.getMongo().startSession();
 session2.startTransaction();
+const sdb2 = session2.getDatabase("course_registration");
 
-const docForT1 = db.bank_accounts.findOne(
-  { student_id: "student002" },
-  { session: session2 }
-);
+const docForT1 = sdb2.bank_accounts.findOne({ student_id: "student002" });
 console.log("T1 reads: version = " + docForT1.version + ", balance = " + docForT1.balance);
 
 // ============================================================================
@@ -108,7 +103,7 @@ console.log("T1 reads: version = " + docForT1.version + ", balance = " + docForT
 // ============================================================================
 
 console.log("\nT1: Update with version check");
-const updateResult1 = db.bank_accounts.updateOne(
+const updateResult1 = sdb2.bank_accounts.updateOne(
   {
     student_id: "student002",
     version: docForT1.version
@@ -119,7 +114,6 @@ const updateResult1 = db.bank_accounts.updateOne(
       version: docForT1.version + 1
     }
   },
-  { session: session2 }
 );
 
 if (updateResult1.modifiedCount === 1) {
@@ -180,12 +174,10 @@ db.enrollments.findOne({ _id: 1 });
 console.log("\nT1: START TRANSACTION - Read-Modify-Write");
 const session3 = db.getMongo().startSession();
 session3.startTransaction();
+const sdb3 = session3.getDatabase("course_registration");
 
 console.log("T1: Read enrollment");
-const enrollment = db.enrollments.findOne(
-  { _id: 1 },
-  { session: session3 }
-);
+const enrollment = sdb3.enrollments.findOne({ _id: 1 });
 console.log("T1 reads: " + JSON.stringify(enrollment));
 
 console.log("\nT1: Check condition (application logic)");
@@ -193,15 +185,14 @@ if (enrollment.status === "enrolled") {
   console.log("Status is 'enrolled' - proceed to update");
   
   console.log("T1: Update status to 'payed'");
-  const result = db.enrollments.updateOne(
+  const result = sdb3.enrollments.updateOne(
     { _id: 1, version: enrollment.enrollment_version || 1 },
     {
       $set: {
         status: "payed",
         enrollment_version: (enrollment.enrollment_version || 1) + 1
       }
-    },
-    { session: session3 }
+    }
   );
   
   if (result.modifiedCount === 1) {
@@ -247,10 +238,11 @@ db.bank_accounts.find({ student_id: { $in: ["student001", "student002"] } }).for
 console.log("\n[Transfer scenario: T1 transfers from student001 to student002]");
 const session4 = db.getMongo().startSession();
 session4.startTransaction();
+const sdb4 = session4.getDatabase("course_registration");
 
 console.log("T1: Read both accounts");
-const src = db.bank_accounts.findOne({ student_id: "student001" }, { session: session4 });
-const dst = db.bank_accounts.findOne({ student_id: "student002" }, { session: session4 });
+const src = sdb4.bank_accounts.findOne({ student_id: "student001" });
+const dst = sdb4.bank_accounts.findOne({ student_id: "student002" });
 
 const transfer_amount = 100000;
 console.log("T1: Transfer " + transfer_amount + " from student001 to student002");
@@ -259,17 +251,15 @@ if (src.balance >= transfer_amount) {
   console.log("T1: Sufficient balance, proceed");
   
   console.log("T1: Debit from source");
-  db.bank_accounts.updateOne(
+  sdb4.bank_accounts.updateOne(
     { student_id: "student001" },
-    { $inc: { balance: -transfer_amount }, $set: { version: src.version + 1 } },
-    { session: session4 }
+    { $inc: { balance: -transfer_amount }, $set: { version: src.version + 1 } }
   );
   
   console.log("T1: Credit to destination");
-  db.bank_accounts.updateOne(
+  sdb4.bank_accounts.updateOne(
     { student_id: "student002" },
-    { $inc: { balance: transfer_amount }, $set: { version: dst.version + 1 } },
-    { session: session4 }
+    { $inc: { balance: transfer_amount }, $set: { version: dst.version + 1 } }
   );
   
   console.log("T1: Both operations complete");
