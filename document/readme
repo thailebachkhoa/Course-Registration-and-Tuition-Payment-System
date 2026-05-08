@@ -14,53 +14,7 @@
 ## 🗂️ Cấu trúc thư mục hoàn chỉnh
 
 ```
-.
-├── backend/
-│   ├── src/
-│   │   ├── config/
-│   │   │   └── db.js              # Re-export pool (bridge cho controllers)
-│   │   ├── controllers/
-│   │   │   ├── adminController.js
-│   │   │   ├── authController.js
-│   │   │   ├── studentController.js
-│   │   │   └── teacherController.js
-│   │   ├── db/
-│   │   │   ├── db.js              # MySQL connection pool
-│   │   │   ├── init.js            # Script khởi tạo DB
-│   │   │   └── schema.sql         # DDL + seed data
-│   │   ├── middleware/
-│   │   │   ├── auth.js            # JWT authenticate + requireRole
-│   │   │   └── stageCheck.js      # requireStage middleware
-│   │   ├── routes/
-│   │   │   ├── adminRoutes.js
-│   │   │   ├── authRoutes.js
-│   │   │   ├── studentRoutes.js
-│   │   │   └── teacherRoutes.js
-│   │   └── server.js
-│   ├── .env
-│   ├── .gitignore
-│   └── package.json
-│
-└── frontend/
-    ├── public/
-    │   └── index.html             # ← PHẢI NẰM Ở ĐÂY (sau khi mv)
-    ├── src/
-    │   ├── api/
-    │   │   └── index.js           # Axios instance + tất cả API calls
-    │   ├── context/
-    │   │   └── AuthContext.js     # Global auth state
-    │   ├── pages/
-    │   │   ├── LoginPage.js
-    │   │   ├── RegisterPage.js
-    │   │   ├── AdminDashboard.js
-    │   │   ├── TeacherDashboard.js
-    │   │   └── StudentDashboard.js
-    │   ├── styles/
-    │   │   └── index.css
-    │   ├── App.js                 # Router
-    │   └── index.js               # React entry point
-    ├── .gitignore
-    └── package.json
+
 ```
 
 ---
@@ -105,20 +59,12 @@ PORT=5000
 
 ```bash
 cd backend
-npm install
-npm run init-db
-```
-
-Kết quả thành công sẽ in ra:
-```
-✅ Connected to MySQL
-✅ Schema applied
-✅ Admin account ready (email: admin@school.edu.vn, pass: admin123)
-🎉 Database initialized successfully!
+npm i
+node src/database/init.js
 ```
 
 Script này tự động:
-- Tạo database `course_registration`
+- Tạo database `appdb`
 - Tạo tất cả bảng (Users, Courses, Classes, Enrollments, SystemState)
 - Seed 20 môn học có sẵn
 - Tạo tài khoản admin với mật khẩu đã hash
@@ -156,7 +102,6 @@ Frontend chạy tại: `http://localhost:3000`
 
 | Role  | Email / ID              | Mật khẩu |
 |-------|-------------------------|-----------|
-| Admin | `admin@school.edu.vn`   | `admin123`|
 | Admin | `admin001`              | `admin123`|
 
 Tài khoản Giảng viên và Sinh viên tự đăng ký tại trang `/register`.
@@ -241,26 +186,6 @@ Enrollments    — Đăng ký môn (FK: student_id, class_id) | status: enrolled
 ```
 
 ---
-
-## ❓ Xử lý lỗi thường gặp
-
-**`Error: connect ECONNREFUSED`**
-→ MySQL chưa chạy. Khởi động MySQL service.
-
-**`Access denied for user 'root'@'localhost'`**
-→ Sai mật khẩu DB trong `.env`. Kiểm tra lại `DB_PASSWORD`.
-
-**`Cannot find module '../controllers/adminController'`**
-→ Tên file route cũ (`adminRoute.js`) không khớp. Đảm bảo dùng `adminRoutes.js` (có chữ s).
-
-**`Failed to compile` – `Cannot find module`**
-→ Quên chạy `npm install` trong thư mục `frontend/`.
-
-**Trang trắng sau khi `npm start`**
-→ `index.html` chưa được move vào `frontend/public/`. Xem **Bug 1** ở trên.
-
-mô tả btl: 
-https://docs.google.com/document/d/1LnqBgv4yEpLlybXjKwH_FKy1poBWIZNRYLcyAMoN030/edit?usp=sharing
 
 
  

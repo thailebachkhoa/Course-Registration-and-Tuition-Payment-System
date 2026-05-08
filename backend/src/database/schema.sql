@@ -30,8 +30,7 @@ CREATE TABLE IF NOT EXISTS Users (
     password VARCHAR(255) NOT NULL,
     full_name VARCHAR(255),
     role ENUM('admin', 'teacher', 'student') NOT NULL DEFAULT 'student',
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    KEY idx_users_role (role)
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
 -- =============================================
@@ -45,9 +44,6 @@ CREATE TABLE IF NOT EXISTS Classes (
     start_time TIME NOT NULL,
     end_time TIME NOT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    CONSTRAINT chk_class_time CHECK (start_time < end_time),
-    KEY idx_classes_teacher (teacher_id),
-    KEY idx_classes_course (course_code),
     FOREIGN KEY (course_code) REFERENCES Courses(course_code) ON DELETE CASCADE,
     FOREIGN KEY (teacher_id) REFERENCES Users(person_id) ON DELETE CASCADE
 );
@@ -63,9 +59,6 @@ CREATE TABLE IF NOT EXISTS Enrollments (
     payment_requested BOOLEAN DEFAULT FALSE,
     enrolled_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     UNIQUE KEY unique_enrollment (student_id, class_id),
-    KEY idx_enrollments_student_status (student_id, status),
-    KEY idx_enrollments_payment (payment_requested, status),
-    KEY idx_enrollments_class (class_id),
     FOREIGN KEY (student_id) REFERENCES Users(person_id) ON DELETE CASCADE,
     FOREIGN KEY (class_id) REFERENCES Classes(class_id) ON DELETE CASCADE
 );
