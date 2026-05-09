@@ -30,7 +30,7 @@ if ($mongoSource.Path -ne $mongoTarget) {
 docker compose exec -T mysql sh -lc "mysql -h127.0.0.1 -uroot -proot -e 'DROP DATABASE IF EXISTS course_comparison; CREATE DATABASE course_comparison CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;'"
 if ($LASTEXITCODE -ne 0) { throw "MySQL database reset failed with exit code $LASTEXITCODE" }
 
-docker compose exec -T mysql sh -lc "mysql -h127.0.0.1 -uroot -proot course_comparison < /backups/$mysqlName"
+Get-Content -LiteralPath $mysqlTarget | docker compose exec -T mysql sh -lc "mysql -h127.0.0.1 -uroot -proot course_comparison"
 if ($LASTEXITCODE -ne 0) { throw "MySQL restore failed with exit code $LASTEXITCODE" }
 
 docker compose exec -T mongo sh -lc "mongorestore --drop --archive=/backups/$mongoName --gzip"

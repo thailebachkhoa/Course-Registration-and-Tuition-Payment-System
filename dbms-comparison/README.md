@@ -59,6 +59,12 @@ powershell -ExecutionPolicy Bypass -File .\scripts\restore.ps1 `
   -MongoArchive .\backups\mongo\course_comparison_YYYYMMDD-HHMMSS.archive
 ```
 
+To verify restored data against the pre-backup state with MySQL checksums and MongoDB `dbHash` values:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\verify-backup-restore.ps1
+```
+
 ## Comparison map
 
 | Topic | MySQL | MongoDB |
